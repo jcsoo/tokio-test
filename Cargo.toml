@@ -1,0 +1,10 @@
+[package]
+name = "tokio-test"
+version = "0.1.0"
+authors = ["Jonathan Soo <jcsoo@agora.com>"]
+
+[dependencies]
+tokio = { git = "https://github.com/tokio-rs/tokio" }
+futures = "0.1.0"
+httparse = "1.1.2"
+trust-dns = "0.7.3"
