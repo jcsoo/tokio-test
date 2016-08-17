@@ -60,7 +60,6 @@ impl Task for Resolver {
                 }
             }
         }
-        Ok(Tick::WouldBlock)        
     } 
 }
 
