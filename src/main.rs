@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 
 extern crate tokio;
 extern crate futures;
@@ -14,43 +14,36 @@ use dns_query::Message;
 
 use futures::Future;
 
-use tokio::Service;
 use tokio::io::Readiness;
 use tokio::reactor::{self, Reactor, Task, Tick};
-use tokio::tcp::TcpStream;
-use tokio::util::future::{pair, Complete, Val};
+use tokio::util::future::{pair, Complete};
 use tokio::util::channel::{Receiver};
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::io;
 
-enum State {
-    Sending,
-    Receiving,
-}
+type CompleteMessage = Complete<Message,()>;
 
 struct Resolver {
     socket: UdpSocket,
     addr: SocketAddr,
-    state: State,
-    sender: mio::channel::Sender<(String, Complete<Message,()>)>,
-    hosts: Receiver<(String, Complete<Message,()>)>,
-    requests: HashMap<u16, Complete<Message,()>>,
+    tx: mio::channel::Sender<(String, CompleteMessage)>,
+    rx: Receiver<(String, CompleteMessage)>,
+    requests: HashMap<u16, CompleteMessage>,
     next_id: u16,
 } 
 
 impl Resolver {
     fn new(addr: SocketAddr) -> Resolver {        
         let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
-        let (tx, rx) = channel::<(String, Complete<Message,()>)>();     
-        let wrapped = Receiver::watch(rx).unwrap();   
+        let (tx, rx) = channel::<(String, CompleteMessage)>();     
+        let rx = Receiver::watch(rx).unwrap();   
         Resolver{ 
             socket: socket, 
             addr: addr, 
-            state: State::Sending,
-            sender: tx,
-            hosts: wrapped,
+            tx: tx,
+            rx: rx,
             requests: HashMap::new(),
             next_id: 1000, 
         }
@@ -65,24 +58,22 @@ impl Resolver {
     fn lookup(&mut self, host: String) -> Box<Future<Item=Message, Error=()>> {
         println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
-        let _ = self.sender.send((host, c));
+        let _ = self.tx.send((host, c));
         Box::new(v)
     }
 }
 
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
-        // if items and socket writeable
-        while self.socket.is_writable() && self.hosts.is_readable() {
-            if let Some((host, c)) = self.hosts.recv().unwrap() {
+        while self.socket.is_writable() && self.rx.is_readable() {
+            if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
                 let buf = dns_query::build_query(id, &host);
                 println!("{}: {} to {}", id, host, self.addr);
-                if let Ok(n) = self.socket.send_to(&buf, &self.addr) {
-                    println!(" {} bytes sent", n);
+                if let Ok(_) = self.socket.send_to(&buf, &self.addr) {
                     self.requests.insert(id, c);
                 } else {
-                    let _ = self.sender.send((host, c));
+                    let _ = self.tx.send((host, c));
                     break;
                 }
             } else {
