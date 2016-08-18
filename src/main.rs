@@ -66,7 +66,6 @@ impl Resolver {
 
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
-        println!("tick:start");
         // if items and socket writeable
         while self.socket.is_writable() {
             if let Some((host, c)) = self.hosts.pop_front() {
@@ -84,53 +83,21 @@ impl Task for Resolver {
                 break;
             }
         }
-        println!("readable? {}", self.socket.is_readable());
         while self.socket.is_readable() {
-            println!("read...");
             let mut buf = [0u8;512];
             if let Ok(_) = self.socket.recv_from(&mut buf) {
                 let msg = dns_query::parse_response(&mut buf);                
-                println!("message: {:?}", msg);
+                //println!("message: {:?}", msg);
                 let id = msg.get_id();
                 if let Some(c) = self.requests.remove(&id) {
-                    println!("completing...");
                     c.complete(msg);
-                    println!("done completing");
                 }
             } else {
                 break;
             }
         }
-        println!("tick:end");
         Ok(Tick::WouldBlock)
     }
-
-/*
-   fn tick(&mut self) -> io::Result<Tick> {
-        loop {
-            match self.state {
-                State::Sending => {
-                    let buf = dns_query::build_query(1234, "google.com");
-                    if let Ok(_) = self.socket.send_to(&buf, &self.addr) {
-                        self.state = State::Receiving;
-                    } else {
-                        return Ok(Tick::WouldBlock)
-                    }
-                },
-                State::Receiving => {
-                    let mut buf = [0u8;512];
-                    if let Ok(_) = self.socket.recv_from(&mut buf) {
-                        let msg = dns_query::parse_response(&mut buf);
-                        println!("message: {:?}", msg);
-                        return Ok(Tick::Final);                    
-                    } else {
-                        return Ok(Tick::WouldBlock);
-                    }
-                }
-            }
-        }
-    }
-    */ 
 }
 
 fn main() {    
@@ -138,7 +105,10 @@ fn main() {
     reactor.handle().oneshot(|| {
         let mut resolver = Resolver::new("8.8.8.8:53".parse().unwrap());
 
-        resolver.lookup("google.com".to_owned());
+        resolver
+            .lookup("google.com".to_owned())
+            .map(|msg| println!("msg: {:?}", msg))
+            .forget();
 
         reactor::schedule(resolver).unwrap();
     });
