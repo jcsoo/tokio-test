@@ -14,7 +14,6 @@ pub struct UdpSocket {
 }
 
 impl UdpSocket {
-
     /// Creates a UDP socket from the given address.
     pub fn bind(addr: &SocketAddr) -> io::Result<UdpSocket> {
         let mio = try!(mio::UdpSocket::bind(addr));

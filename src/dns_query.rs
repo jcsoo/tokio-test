@@ -1,5 +1,5 @@
 use trust_dns::udp::UdpClientConnection;
-use trust_dns::client::{ClientConnection};
+use trust_dns::client::ClientConnection;
 use trust_dns::rr::domain::Name;
 use trust_dns::rr::dns_class::DNSClass;
 use trust_dns::rr::record_type::RecordType;
@@ -11,7 +11,7 @@ pub use trust_dns::op::Message;
 
 pub fn build_query(id: u16, host: &str) -> Vec<u8> {
     let root = Name::root();
-    let name = Name::parse(host,Some(&root)).unwrap();
+    let name = Name::parse(host, Some(&root)).unwrap();
 
     let mut msg: Message = Message::new();
     msg.id(id).message_type(MessageType::Query).op_code(OpCode::Query).recursion_desired(true);
@@ -21,8 +21,8 @@ pub fn build_query(id: u16, host: &str) -> Vec<u8> {
 
     let mut buffer: Vec<u8> = Vec::with_capacity(512);
     {
-      let mut encoder = BinEncoder::new(&mut buffer);
-      msg.emit(&mut encoder).unwrap();
+        let mut encoder = BinEncoder::new(&mut buffer);
+        msg.emit(&mut encoder).unwrap();
     }
     buffer
 }

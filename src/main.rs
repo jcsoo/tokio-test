@@ -17,13 +17,13 @@ use futures::Future;
 use tokio::io::Readiness;
 use tokio::reactor::{self, Reactor, Task, Tick};
 use tokio::util::future::{pair, Complete};
-use tokio::util::channel::{Receiver};
+use tokio::util::channel::Receiver;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::io;
 
-type CompleteMessage = Complete<Message,()>;
+type CompleteMessage = Complete<Message, ()>;
 
 struct Resolver {
     socket: Option<UdpSocket>,
@@ -39,8 +39,6 @@ struct ResolverHandle {
 }
 
 impl Resolver {
-
-
     fn next_id(&mut self) -> u16 {
         let v = self.next_id;
         self.next_id += 1;
@@ -49,7 +47,7 @@ impl Resolver {
 }
 
 impl ResolverHandle {
-    fn lookup(&self, host: String) -> Box<Future<Item=Message, Error=()>> {
+    fn lookup(&self, host: String) -> Box<Future<Item = Message, Error = ()>> {
         println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
         let _ = self.tx.send((host, c));
@@ -61,9 +59,9 @@ impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
         let socket = match self.socket.take() {
             Some(s) => s,
-            None => UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap()
+            None => UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap(),
         };
-        
+
         while socket.is_writable() && self.rx.is_readable() {
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
@@ -80,10 +78,10 @@ impl Task for Resolver {
             }
         }
         while socket.is_readable() {
-            let mut buf = [0u8;512];
+            let mut buf = [0u8; 512];
             if let Ok(_) = socket.recv_from(&mut buf) {
-                let msg = dns_query::parse_response(&mut buf);                
-                //println!("message: {:?}", msg);
+                let msg = dns_query::parse_response(&mut buf);
+                // println!("message: {:?}", msg);
                 let id = msg.get_id();
                 if let Some(c) = self.requests.remove(&id) {
                     c.complete(msg);
@@ -101,50 +99,46 @@ fn setup(addr: SocketAddr) -> ResolverHandle {
     // must be run within a reactor
     let (tx, rx) = channel::<(String, CompleteMessage)>();
     let tx2 = tx.clone();
-    //reactor::oneshot(move || {             
-        let rx = Receiver::watch(rx).unwrap();   
-        
-        let r = Resolver { 
-            socket: None, 
-            addr: addr,
-            tx: tx.clone(),             
-            rx: rx,
-            requests: HashMap::new(),
-            next_id: 1000, 
-        };
-        reactor::schedule(r).unwrap();
-    //}).unwrap();        
+    // reactor::oneshot(move || {
+    let rx = Receiver::watch(rx).unwrap();
 
-    ResolverHandle{tx: tx2}
+    let r = Resolver {
+        socket: None,
+        addr: addr,
+        tx: tx.clone(),
+        rx: rx,
+        requests: HashMap::new(),
+        next_id: 1000,
+    };
+    reactor::schedule(r).unwrap();
+    // }).unwrap();
+
+    ResolverHandle { tx: tx2 }
 }
 
 fn print_response(m: Message) {
     println!("msg: {:?}", m.get_answers());
 }
 
-fn main() {    
+fn main() {
     let reactor = Reactor::default().unwrap();
     reactor.handle().oneshot(move || {
         let resolver = setup("8.8.8.8:53".parse().unwrap());
-        let r1 = resolver
-            .lookup("google.com".to_owned())
-            .map(print_response);  
-
-        let r2 = resolver
-            .lookup("amazon.com".to_owned())
-            .map(print_response);            
-
-        let r3 = resolver
-            .lookup("apple.com".to_owned())
+        let r1 = resolver.lookup("google.com".to_owned())
             .map(print_response);
 
-        r1.join(r2).join(r3)
-            .map(|_| {                
+        let r2 = resolver.lookup("amazon.com".to_owned())
+            .map(print_response);
+
+        let r3 = resolver.lookup("apple.com".to_owned())
+            .map(print_response);
+
+        r1.join(r2)
+            .join(r3)
+            .map(|_| {
                 reactor::shutdown().unwrap();
-            }).forget();
+            })
+            .forget();
     });
     reactor.run().unwrap();
 }
-
-
-    
