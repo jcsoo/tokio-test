@@ -95,25 +95,23 @@ impl Task for Resolver {
     }
 }
 
-fn setup(addr: SocketAddr) -> ResolverHandle {
+fn resolver(addr: SocketAddr) -> ResolverHandle {
     // must be run within a reactor
     let (tx, rx) = channel::<(String, CompleteMessage)>();
-    let tx2 = tx.clone();
-    // reactor::oneshot(move || {
-    let rx = Receiver::watch(rx).unwrap();
 
-    let r = Resolver {
-        socket: None,
-        addr: addr,
-        tx: tx.clone(),
-        rx: rx,
-        requests: HashMap::new(),
-        next_id: 1000,
-    };
-    reactor::schedule(r).unwrap();
-    // }).unwrap();
-
-    ResolverHandle { tx: tx2 }
+    {
+        let r = Resolver {
+            socket: None,
+            addr: addr,
+            tx: tx.clone(),
+            rx: Receiver::watch(rx).unwrap(),
+            requests: HashMap::new(),
+            next_id: 1000,
+        };
+        reactor::schedule(r).unwrap();
+    }
+    
+    ResolverHandle { tx: tx }
 }
 
 fn print_response(m: Message) {
@@ -123,7 +121,7 @@ fn print_response(m: Message) {
 fn main() {
     let reactor = Reactor::default().unwrap();
     reactor.handle().oneshot(move || {
-        let resolver = setup("8.8.8.8:53".parse().unwrap());
+        let resolver = resolver("8.8.8.8:53".parse().unwrap());
         let r1 = resolver.lookup("google.com".to_owned())
             .map(print_response);
 
