@@ -73,7 +73,7 @@ impl Resolver {
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
         // if items and socket writeable
-        while self.socket.is_writable() {
+        while self.socket.is_writable() && self.hosts.is_readable() {
             if let Some((host, c)) = self.hosts.recv().unwrap() {
                 let id = self.next_id();
                 let buf = dns_query::build_query(id, &host);
