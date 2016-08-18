@@ -26,36 +26,30 @@ use std::io;
 type CompleteMessage = Complete<Message,()>;
 
 struct Resolver {
-    socket: UdpSocket,
+    socket: Option<UdpSocket>,
     addr: SocketAddr,
     tx: mio::channel::Sender<(String, CompleteMessage)>,
     rx: Receiver<(String, CompleteMessage)>,
     requests: HashMap<u16, CompleteMessage>,
     next_id: u16,
-} 
+}
+
+struct ResolverHandle {
+    tx: mio::channel::Sender<(String, CompleteMessage)>,
+}
 
 impl Resolver {
-    fn new(addr: SocketAddr) -> Resolver {        
-        let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
-        let (tx, rx) = channel::<(String, CompleteMessage)>();     
-        let rx = Receiver::watch(rx).unwrap();   
-        Resolver{ 
-            socket: socket, 
-            addr: addr, 
-            tx: tx,
-            rx: rx,
-            requests: HashMap::new(),
-            next_id: 1000, 
-        }
-    }
+
 
     fn next_id(&mut self) -> u16 {
         let v = self.next_id;
         self.next_id += 1;
         v
     }
+}
 
-    fn lookup(&mut self, host: String) -> Box<Future<Item=Message, Error=()>> {
+impl ResolverHandle {
+    fn lookup(&self, host: String) -> Box<Future<Item=Message, Error=()>> {
         println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
         let _ = self.tx.send((host, c));
@@ -65,12 +59,17 @@ impl Resolver {
 
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
-        while self.socket.is_writable() && self.rx.is_readable() {
+        let socket = match self.socket.take() {
+            Some(s) => s,
+            None => UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap()
+        };
+        
+        while socket.is_writable() && self.rx.is_readable() {
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
                 let buf = dns_query::build_query(id, &host);
                 println!("{}: {} to {}", id, host, self.addr);
-                if let Ok(_) = self.socket.send_to(&buf, &self.addr) {
+                if let Ok(_) = socket.send_to(&buf, &self.addr) {
                     self.requests.insert(id, c);
                 } else {
                     let _ = self.tx.send((host, c));
@@ -80,9 +79,9 @@ impl Task for Resolver {
                 break;
             }
         }
-        while self.socket.is_readable() {
+        while socket.is_readable() {
             let mut buf = [0u8;512];
-            if let Ok(_) = self.socket.recv_from(&mut buf) {
+            if let Ok(_) = socket.recv_from(&mut buf) {
                 let msg = dns_query::parse_response(&mut buf);                
                 //println!("message: {:?}", msg);
                 let id = msg.get_id();
@@ -93,8 +92,30 @@ impl Task for Resolver {
                 break;
             }
         }
+        self.socket = Some(socket);
         Ok(Tick::WouldBlock)
     }
+}
+
+fn setup(addr: SocketAddr) -> ResolverHandle {
+    // must be run within a reactor
+    let (tx, rx) = channel::<(String, CompleteMessage)>();
+    let tx2 = tx.clone();
+    //reactor::oneshot(move || {             
+        let rx = Receiver::watch(rx).unwrap();   
+        
+        let r = Resolver { 
+            socket: None, 
+            addr: addr,
+            tx: tx.clone(),             
+            rx: rx,
+            requests: HashMap::new(),
+            next_id: 1000, 
+        };
+        reactor::schedule(r).unwrap();
+    //}).unwrap();        
+
+    ResolverHandle{tx: tx2}
 }
 
 fn print_response(m: Message) {
@@ -102,22 +123,24 @@ fn print_response(m: Message) {
 }
 
 fn main() {    
-    let reactor = Reactor::default().unwrap();     
-    reactor.handle().oneshot(|| {
-        let mut resolver = Resolver::new("8.8.8.8:53".parse().unwrap());
-
-        resolver
+    let reactor = Reactor::default().unwrap();
+    reactor.handle().oneshot(move || {
+        let resolver = setup("8.8.8.8:53".parse().unwrap());
+        let r1 = resolver
             .lookup("google.com".to_owned())
-            .map(print_response)
-            .forget();
+            .map(print_response);  
 
-        resolver
+        let r2 = resolver
             .lookup("amazon.com".to_owned())
-            .map(print_response)
-            .forget();
-
-        reactor::schedule(resolver).unwrap();
+            .map(print_response);            
+        r1.join(r2)
+            .map(|_| {
+                println!("done!");
+                reactor::shutdown().unwrap();
+            }).forget();
     });
     reactor.run().unwrap();
 }
+
+
     
