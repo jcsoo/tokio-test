@@ -57,15 +57,22 @@ impl ResolverHandle {
 
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
+        let mut buf: Vec<u8> = Vec::with_capacity(4096);
         let socket = match self.socket.take() {
             Some(s) => s,
             None => UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap(),
         };
 
-        while socket.is_writable() && self.rx.is_readable() {
+        // Avoid short circuit evaluation of both sources 
+
+        let socket_writable = socket.is_writable();
+        let rx_readable = self.rx.is_readable();
+
+        while socket_writable && rx_readable {
+            buf.clear();
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
-                let buf = dns_query::build_query(id, &host);
+                dns_query::encode_query(&mut buf, id, dns_query::a_query(&host));
                 println!("{}: {} to {}", id, host, self.addr);
                 if let Ok(_) = socket.send_to(&buf, &self.addr) {
                     self.requests.insert(id, c);
@@ -80,7 +87,7 @@ impl Task for Resolver {
         while socket.is_readable() {
             let mut buf = [0u8; 512];
             if let Ok(_) = socket.recv_from(&mut buf) {
-                let msg = dns_query::parse_response(&mut buf);
+                let msg = dns_query::decode_message(&mut buf);
                 // println!("message: {:?}", msg);
                 let id = msg.get_id();
                 if let Some(c) = self.requests.remove(&id) {
