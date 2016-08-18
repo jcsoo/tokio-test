@@ -6,6 +6,7 @@ extern crate mio;
 extern crate trust_dns;
 
 mod udp;
+mod udp_client;
 mod dns_query;
 
 use mio::channel::channel;
