@@ -133,9 +133,13 @@ fn main() {
         let r2 = resolver
             .lookup("amazon.com".to_owned())
             .map(print_response);            
-        r1.join(r2)
-            .map(|_| {
-                println!("done!");
+
+        let r3 = resolver
+            .lookup("apple.com".to_owned())
+            .map(print_response);
+
+        r1.join(r2).join(r3)
+            .map(|_| {                
                 reactor::shutdown().unwrap();
             }).forget();
     });
