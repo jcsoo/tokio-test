@@ -100,6 +100,10 @@ impl Task for Resolver {
     }
 }
 
+fn print_response(m: Message) {
+    println!("msg: {:?}", m.get_answers());
+}
+
 fn main() {    
     let reactor = Reactor::default().unwrap();     
     reactor.handle().oneshot(|| {
@@ -107,7 +111,12 @@ fn main() {
 
         resolver
             .lookup("google.com".to_owned())
-            .map(|msg| println!("msg: {:?}", msg))
+            .map(print_response)
+            .forget();
+
+        resolver
+            .lookup("amazon.com".to_owned())
+            .map(print_response)
             .forget();
 
         reactor::schedule(resolver).unwrap();
