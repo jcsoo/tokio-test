@@ -8,6 +8,7 @@ extern crate trust_dns;
 mod udp;
 mod dns_query;
 
+use mio::channel::channel;
 use udp::UdpSocket;
 use dns_query::Message;
 
@@ -18,6 +19,7 @@ use tokio::io::Readiness;
 use tokio::reactor::{self, Reactor, Task, Tick};
 use tokio::tcp::TcpStream;
 use tokio::util::future::{pair, Complete, Val};
+use tokio::util::channel::{Receiver};
 
 use std::collections::{VecDeque, HashMap};
 use std::net::SocketAddr;
@@ -32,19 +34,23 @@ struct Resolver {
     socket: UdpSocket,
     addr: SocketAddr,
     state: State,
-    hosts: VecDeque<(String, Complete<Message,()>)>,
+    sender: mio::channel::Sender<(String, Complete<Message,()>)>,
+    hosts: Receiver<(String, Complete<Message,()>)>,
     requests: HashMap<u16, Complete<Message,()>>,
     next_id: u16,
 } 
 
 impl Resolver {
     fn new(addr: SocketAddr) -> Resolver {        
-        let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();        
+        let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
+        let (tx, rx) = channel::<(String, Complete<Message,()>)>();     
+        let wrapped = Receiver::watch(rx).unwrap();   
         Resolver{ 
             socket: socket, 
             addr: addr, 
             state: State::Sending,
-            hosts: VecDeque::new(),
+            sender: tx,
+            hosts: wrapped,
             requests: HashMap::new(),
             next_id: 1000, 
         }
@@ -59,7 +65,7 @@ impl Resolver {
     fn lookup(&mut self, host: String) -> Box<Future<Item=Message, Error=()>> {
         println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
-        self.hosts.push_back((host, c));
+        let _ = self.sender.send((host, c));
         Box::new(v)
     }
 }
@@ -68,7 +74,7 @@ impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
         // if items and socket writeable
         while self.socket.is_writable() {
-            if let Some((host, c)) = self.hosts.pop_front() {
+            if let Some((host, c)) = self.hosts.recv().unwrap() {
                 let id = self.next_id();
                 let buf = dns_query::build_query(id, &host);
                 println!("{}: {} to {}", id, host, self.addr);
@@ -76,7 +82,7 @@ impl Task for Resolver {
                     println!(" {} bytes sent", n);
                     self.requests.insert(id, c);
                 } else {
-                    self.hosts.push_front((host, c));
+                    let _ = self.sender.send((host, c));
                     break;
                 }
             } else {
