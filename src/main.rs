@@ -1,16 +1,12 @@
 #![allow(dead_code)]
 
-extern crate tokio;
 extern crate futures;
-extern crate mio;
+extern crate tokio;
+extern crate tokio_test;
 extern crate trust_dns;
 
-mod udp;
-mod dns_query;
-mod transport;
-mod resolver;
-
-use dns_query::Message;
+use tokio_test::dns_query::Message;
+use tokio_test::resolver;
 
 use futures::Future;
 
