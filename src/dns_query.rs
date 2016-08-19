@@ -33,10 +33,10 @@ pub fn build_query_message(id: u16, query: Query) -> Message {
 }
 
 pub fn encode_query(buf: &mut Vec<u8>, id: u16, query: Query) {
-    encode_message(buf, build_query_message(id, query));
+    encode_message(buf, &build_query_message(id, query));
 }
 
-pub fn encode_message(buf: &mut Vec<u8>, msg: Message) {
+pub fn encode_message(buf: &mut Vec<u8>, msg: &Message) {
     let mut encoder = BinEncoder::new(buf);
     msg.emit(&mut encoder).unwrap();
 }
