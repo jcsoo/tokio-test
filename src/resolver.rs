@@ -3,13 +3,15 @@ use mio::channel::channel;
 use udp::UdpSocket;
 use dns_query;
 use dns_query::Message;
+use transport::DnsTransport;
 
 use futures::Future;
 
-use tokio::io::Readiness;
+use tokio::io::{Transport, Readiness};
 use tokio::reactor::{self, Task, Tick};
 use tokio::util::future::{pair, Complete};
 use tokio::util::channel::Receiver;
+use tokio::proto::pipeline::Frame;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -18,7 +20,7 @@ use std::io;
 type CompleteMessage = Complete<Message, ()>;
 
 struct Resolver {
-    socket: Option<UdpSocket>,
+    transport: DnsTransport,
     addr: SocketAddr,
     tx: mio::channel::Sender<(String, CompleteMessage)>,
     rx: Receiver<(String, CompleteMessage)>,
@@ -48,22 +50,14 @@ impl ResolverHandle {
 }
 
 impl Task for Resolver {
-    fn tick(&mut self) -> io::Result<Tick> {
-        let mut buf: Vec<u8> = Vec::with_capacity(4096);
-        let socket = match self.socket.take() {
-            Some(s) => s,
-            None => UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap(),
-        };
-
-        // Avoid short circuit evaluation of both sources 
-
-        while self.rx.is_readable() {
-            buf.clear();
+    fn tick(&mut self) -> io::Result<Tick> {                
+        while self.rx.is_readable() {            
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
-                dns_query::encode_query(&mut buf, id, dns_query::a_query(&host));
-                println!("{}: {} to {}", id, host, self.addr);
-                if let Ok(_) = socket.send_to(&buf, &self.addr) {
+                let msg = dns_query::build_query_message(id, dns_query::a_query(&host));
+                let frame = Frame::Message((self.addr.clone(), msg));
+            
+                if let Ok(_) = self.transport.write(frame) {
                     self.requests.insert(id, c);
                 } else {
                     let _ = self.tx.send((host, c));
@@ -73,11 +67,11 @@ impl Task for Resolver {
                 break;
             }
         }
-        while socket.is_readable() {
-            let mut buf = [0u8; 512];
-            if let Ok(_) = socket.recv_from(&mut buf) {
-                let msg = dns_query::decode_message(&mut buf);
-                // println!("message: {:?}", msg);
+        
+        while self.transport.is_readable() {                        
+            if let Ok(Some(Frame::Message(v))) = self.transport.read() {
+                let (_addr, msg) = v;
+
                 let id = msg.get_id();
                 if let Some(c) = self.requests.remove(&id) {
                     c.complete(msg);
@@ -86,7 +80,7 @@ impl Task for Resolver {
                 break;
             }
         }
-        self.socket = Some(socket);
+
         Ok(Tick::WouldBlock)
     }
 }
@@ -94,10 +88,11 @@ impl Task for Resolver {
 pub fn resolver(addr: SocketAddr) -> ResolverHandle {
     // must be run within a reactor
     let (tx, rx) = channel::<(String, CompleteMessage)>();
-
+    let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
+    let transport = DnsTransport::new(socket);        
     {
         let r = Resolver {
-            socket: None,
+            transport: transport,
             addr: addr,
             tx: tx.clone(),
             rx: Receiver::watch(rx).unwrap(),

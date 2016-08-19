@@ -15,12 +15,16 @@ pub fn a_query(host: &str) -> Query {
     query
 }
 
-pub fn encode_query(buf: &mut Vec<u8>, id: u16, query: Query) {
+pub fn build_query_message(id: u16, query: Query) -> Message {
     let mut msg: Message = Message::new();
     msg.id(id).message_type(MessageType::Query).op_code(OpCode::Query).recursion_desired(true);
 
     msg.add_query(query);
-    encode_message(buf, msg);
+    msg    
+}
+
+pub fn encode_query(buf: &mut Vec<u8>, id: u16, query: Query) {
+    encode_message(buf, build_query_message(id, query));
 }
 
 pub fn encode_message(buf: &mut Vec<u8>, msg: Message) {

@@ -48,7 +48,7 @@ impl Transport for DnsTransport
     }
 
     fn flush(&mut self) -> io::Result<Option<()>> {
-        unimplemented!()
+        Ok(Some(()))
     }
 }
 
