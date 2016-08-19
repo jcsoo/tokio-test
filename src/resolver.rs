@@ -20,8 +20,7 @@ use std::io;
 type CompleteMessage = Complete<Message, ()>;
 
 struct Resolver {
-    transport: DnsTransport,
-    addr: SocketAddr,
+    transport: DnsTransport,    
     tx: mio::channel::Sender<(String, CompleteMessage)>,
     rx: Receiver<(String, CompleteMessage)>,
     requests: HashMap<u16, CompleteMessage>,
@@ -55,7 +54,7 @@ impl Task for Resolver {
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
                 let msg = dns_query::build_query_message(id, dns_query::a_query(&host));
-                let frame = Frame::Message((self.addr.clone(), msg));
+                let frame = Frame::Message(msg);
             
                 if let Ok(_) = self.transport.write(frame) {
                     self.requests.insert(id, c);
@@ -69,9 +68,7 @@ impl Task for Resolver {
         }
         
         while self.transport.is_readable() {                        
-            if let Ok(Some(Frame::Message(v))) = self.transport.read() {
-                let (_addr, msg) = v;
-
+            if let Ok(Some(Frame::Message(msg))) = self.transport.read() {                
                 let id = msg.get_id();
                 if let Some(c) = self.requests.remove(&id) {
                     c.complete(msg);
@@ -89,11 +86,10 @@ pub fn resolver(addr: SocketAddr) -> ResolverHandle {
     // must be run within a reactor
     let (tx, rx) = channel::<(String, CompleteMessage)>();
     let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
-    let transport = DnsTransport::new(socket);        
+    let transport = DnsTransport::new(socket, addr);        
     {
         let r = Resolver {
-            transport: transport,
-            addr: addr,
+            transport: transport,            
             tx: tx.clone(),
             rx: Receiver::watch(rx).unwrap(),
             requests: HashMap::new(),

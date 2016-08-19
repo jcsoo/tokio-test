@@ -8,17 +8,19 @@ use std::net::SocketAddr;
 use std::io;
 
 
-pub type MsgFrame = Frame<(SocketAddr,Message), io::Error>;
+pub type MsgFrame = Frame<Message, io::Error>;
 
 pub struct DnsTransport {
-    inner: UdpSocket
+    inner: UdpSocket,
+    addr: SocketAddr,
 }
 
 impl DnsTransport
 {
-    pub fn new(inner: UdpSocket) -> DnsTransport {
+    pub fn new(inner: UdpSocket, addr: SocketAddr) -> DnsTransport {
         DnsTransport {
             inner: inner,
+            addr: addr,
         }
     }
 }
@@ -31,16 +33,16 @@ impl Transport for DnsTransport
     fn read(&mut self) -> io::Result<Option<MsgFrame>> {
         let mut buf = [0u8; 512];
         match self.inner.recv_from(&mut buf) {
-            Ok((_, addr)) => Ok(Some(Frame::Message((addr, decode_message(&mut buf))))),
+            Ok((_, _)) => Ok(Some(Frame::Message(decode_message(&mut buf)))),
             Err(e) => Err(e),
         }
     }
     
     fn write(&mut self, msg: MsgFrame) -> io::Result<Option<()>> {
-        if let Frame::Message((addr, message)) = msg {
+        if let Frame::Message(message) = msg {
             let mut buf: Vec<u8> = Vec::with_capacity(512);
             encode_message(&mut buf, message);
-            let _ = try!(self.inner.send_to(&buf, &addr));
+            let _ = try!(self.inner.send_to(&buf, &self.addr));
             Ok(Some(()))
         } else {
             panic!("unexpected error frame")
