@@ -15,6 +15,15 @@ pub fn a_query(host: &str) -> Query {
     query
 }
 
+pub fn any_query(host: &str) -> Query {
+    let mut query = Query::new();
+
+    let root = Name::root();
+    let name = Name::parse(host, Some(&root)).unwrap();    
+    query.name(name).query_class(DNSClass::IN).query_type(RecordType::A);
+    query
+}
+
 pub fn build_query_message(id: u16, query: Query) -> Message {
     let mut msg: Message = Message::new();
     msg.id(id).message_type(MessageType::Query).op_code(OpCode::Query).recursion_desired(true);

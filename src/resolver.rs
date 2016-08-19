@@ -39,7 +39,7 @@ impl ResolverHandle {
         //println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
         let id = DNS_REQ_ID.fetch_add(1, Ordering::Relaxed) as u16;
-        let msg = dns_query::build_query_message(id, dns_query::a_query(&host));
+        let msg = dns_query::build_query_message(id, dns_query::any_query(&host));
         let _ = self.tx.send((id, msg, c));
         Box::new(v)
     }
