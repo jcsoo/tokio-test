@@ -16,8 +16,12 @@ use futures::Future;
 
 use tokio::reactor::{self, Reactor};
 
-fn print_response(m: Message) {
-    println!("msg: {:?}", m.get_answers());
+fn print_response(m: Message) {    
+    println!("{}", m.get_queries()[0].get_name());
+    for a in m.get_answers() {
+        println!("  {:?}: {:?}", a.get_rr_type(), a.get_rdata());
+    }
+    //println!("msg: {:?}", m.get_answers());
 }
 
 fn main() {
