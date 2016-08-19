@@ -7,6 +7,7 @@ use transport::DnsTransport;
 
 use futures::Future;
 
+use tokio::Service;
 use tokio::io::{Transport};
 use tokio::reactor::{self, Task, Tick};
 use tokio::util::future::{pair, Complete};
@@ -20,8 +21,12 @@ use std::io;
 
 static DNS_REQ_ID: AtomicUsize = ATOMIC_USIZE_INIT;
 
-type DnsRequest = (u16, Message, CompleteMessage);
+type DnsRequest = (Message, CompleteMessage);
 type CompleteMessage = Complete<Message, ()>;
+
+pub fn next_request_id() -> u16 {
+    DNS_REQ_ID.fetch_add(1, Ordering::Relaxed) as u16
+}
 
 struct Resolver {
     transport: DnsTransport,    
@@ -34,13 +39,21 @@ pub struct ResolverHandle {
     tx: mio::channel::Sender<DnsRequest>,
 }
 
-impl ResolverHandle {    
-    pub fn lookup(&self, host: String) -> Box<Future<Item = Message, Error = ()>> {
-        //println!("look up {}", host);
+impl ResolverHandle {        
+    pub fn lookup(&self, host: String) -> Box<Future<Item = Message, Error = ()>> {                
+        self.call(dns_query::build_query_message(dns_query::any_query(&host)))
+    }
+}
+
+impl Service for ResolverHandle {
+    type Req = Message;
+    type Resp = Message;
+    type Error = ();
+    type Fut = Box<Future<Item=Self::Resp, Error=Self::Error>>;
+
+    fn call(&self, req: Message) -> Self::Fut {
         let (c, v) = pair::<Message, ()>();
-        let id = DNS_REQ_ID.fetch_add(1, Ordering::Relaxed) as u16;
-        let msg = dns_query::build_query_message(id, dns_query::any_query(&host));
-        let _ = self.tx.send((id, msg, c));
+        let _ = self.tx.send((req, c));
         Box::new(v)
     }
 }
@@ -49,7 +62,8 @@ impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
         self.transport.flush().unwrap();
         
-        while let Some((id, msg, c)) = self.rx.recv().unwrap() {            
+        while let Some((mut msg, c)) = self.rx.recv().unwrap() {
+            let id = msg.id(next_request_id()).get_id();
             try!(self.transport.write(Frame::Message(msg))); 
             self.requests.insert(id, c);            
         }
