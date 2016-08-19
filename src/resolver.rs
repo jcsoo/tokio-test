@@ -15,35 +15,34 @@ use tokio::proto::pipeline::Frame;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
 use std::io;
+
+static DNS_REQ_ID: AtomicUsize = ATOMIC_USIZE_INIT;
 
 type CompleteMessage = Complete<Message, ()>;
 
 struct Resolver {
     transport: DnsTransport,    
-    tx: mio::channel::Sender<(String, CompleteMessage)>,
-    rx: Receiver<(String, CompleteMessage)>,
-    requests: HashMap<u16, CompleteMessage>,
-    next_id: u16,
+    tx: mio::channel::Sender<(u16, String, CompleteMessage)>,
+    rx: Receiver<(u16, String, CompleteMessage)>,
+    requests: HashMap<u16, CompleteMessage>,    
 }
 
 pub struct ResolverHandle {
-    tx: mio::channel::Sender<(String, CompleteMessage)>,
+    tx: mio::channel::Sender<(u16, String, CompleteMessage)>,
 }
 
 impl Resolver {
-    fn next_id(&mut self) -> u16 {
-        let v = self.next_id;
-        self.next_id += 1;
-        v
-    }
+
 }
 
 impl ResolverHandle {
     pub fn lookup(&self, host: String) -> Box<Future<Item = Message, Error = ()>> {
         println!("look up {}", host);
         let (c, v) = pair::<Message, ()>();
-        let _ = self.tx.send((host, c));
+        let id = DNS_REQ_ID.fetch_add(1, Ordering::Relaxed) as u16;
+        let _ = self.tx.send((id, host, c));
         Box::new(v)
     }
 }
@@ -51,15 +50,13 @@ impl ResolverHandle {
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {                
         while self.rx.is_readable() {            
-            if let Some((host, c)) = self.rx.recv().unwrap() {
-                let id = self.next_id();
-                let msg = dns_query::build_query_message(id, dns_query::a_query(&host));
-                let frame = Frame::Message(msg);
+            if let Some((id, host, c)) = self.rx.recv().unwrap() {
+                let msg = dns_query::build_query_message(id, dns_query::a_query(&host));                
             
-                if let Ok(_) = self.transport.write(frame) {
+                if let Ok(_) = self.transport.write(Frame::Message(msg)) {
                     self.requests.insert(id, c);
                 } else {
-                    let _ = self.tx.send((host, c));
+                    let _ = self.tx.send((id, host, c));
                     break;
                 }
             } else {
@@ -68,9 +65,8 @@ impl Task for Resolver {
         }
         
         while self.transport.is_readable() {                        
-            if let Ok(Some(Frame::Message(msg))) = self.transport.read() {                
-                let id = msg.get_id();
-                if let Some(c) = self.requests.remove(&id) {
+            if let Ok(Some(Frame::Message(msg))) = self.transport.read() {                                
+                if let Some(c) = self.requests.remove(&msg.get_id()) {
                     c.complete(msg);
                 }
             } else {
@@ -84,7 +80,7 @@ impl Task for Resolver {
 
 pub fn resolver(addr: SocketAddr) -> ResolverHandle {
     // must be run within a reactor
-    let (tx, rx) = channel::<(String, CompleteMessage)>();
+    let (tx, rx) = channel::<(u16, String, CompleteMessage)>();
     let socket = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).unwrap();
     let transport = DnsTransport::new(socket, addr);        
     {
@@ -93,7 +89,6 @@ pub fn resolver(addr: SocketAddr) -> ResolverHandle {
             tx: tx.clone(),
             rx: Receiver::watch(rx).unwrap(),
             requests: HashMap::new(),
-            next_id: 1000,
         };
         reactor::schedule(r).unwrap();
     }
