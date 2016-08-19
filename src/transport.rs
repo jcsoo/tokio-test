@@ -4,6 +4,7 @@ use udp::UdpSocket;
 use tokio::proto::pipeline::Frame;
 use tokio::io::{Readiness, Transport};
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::io;
 
@@ -13,6 +14,7 @@ pub type MsgFrame = Frame<Message, io::Error>;
 pub struct DnsTransport {
     inner: UdpSocket,
     addr: SocketAddr,
+    send_queue: VecDeque<Message>,
     buf: Vec<u8>,
 }
 
@@ -22,6 +24,7 @@ impl DnsTransport
         DnsTransport {
             inner: inner,
             addr: addr,
+            send_queue: VecDeque::new(),
             buf: Vec::with_capacity(4096),
         }
     }
@@ -41,17 +44,23 @@ impl Transport for DnsTransport
     }
     
     fn write(&mut self, msg: MsgFrame) -> io::Result<Option<()>> {
-        if let Frame::Message(message) = msg {
-            encode_message(&mut self.buf, message);
-            let _ = try!(self.inner.send_to(&self.buf, &self.addr));
-            self.buf.clear();
-            Ok(Some(()))
+        if let Frame::Message(message) = msg {            
+            self.send_queue.push_back(message);
+            return Ok(Some(()))
         } else {
             panic!("unexpected frame type")
         }
     }
 
     fn flush(&mut self) -> io::Result<Option<()>> {
+        while let Some(msg) = self.send_queue.pop_front() {
+            self.buf.clear();                
+            encode_message(&mut self.buf, &msg);
+            if let Err(_) = self.inner.send_to(&self.buf, &self.addr) {
+                self.send_queue.push_front(msg);
+                break;
+            } 
+        }
         Ok(Some(()))
     }
 }

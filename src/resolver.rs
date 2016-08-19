@@ -47,22 +47,22 @@ impl ResolverHandle {
 
 impl Task for Resolver {
     fn tick(&mut self) -> io::Result<Tick> {
-
-        if let Some((id, msg, c)) = self.rx.recv().unwrap() {            
-            if let Ok(_) = self.transport.write(Frame::Message(msg)) {
-                self.requests.insert(id, c);
-            } else {
-                // Can't requeue msg back because it's already been moved
-                //let _ = self.tx.send((id, msg, c));                
-            }
+        self.transport.flush().unwrap();
+        
+        while let Some((id, msg, c)) = self.rx.recv().unwrap() {            
+            try!(self.transport.write(Frame::Message(msg))); 
+            self.requests.insert(id, c);            
         }
 
-        if let Ok(Some(Frame::Message(msg))) = self.transport.read() {                                
-            if let Some(c) = self.requests.remove(&msg.get_id()) {
-                c.complete(msg);
+        if self.requests.len() > 0 {
+            while let Ok(Some(Frame::Message(msg))) = self.transport.read() {
+                if let Some(c) = self.requests.remove(&msg.get_id()) {
+                    c.complete(msg);
+                }
             }
         }
-
+        
+        self.transport.flush().unwrap();
         Ok(Tick::WouldBlock)
     }
 }
