@@ -7,6 +7,7 @@ extern crate trust_dns;
 
 mod udp;
 mod dns_query;
+mod transport;
 mod resolver;
 
 use dns_query::Message;

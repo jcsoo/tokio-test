@@ -57,10 +57,7 @@ impl Task for Resolver {
 
         // Avoid short circuit evaluation of both sources 
 
-        let socket_writable = socket.is_writable();
-        let rx_readable = self.rx.is_readable();
-
-        while socket_writable && rx_readable {
+        while self.rx.is_readable() {
             buf.clear();
             if let Some((host, c)) = self.rx.recv().unwrap() {
                 let id = self.next_id();
