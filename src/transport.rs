@@ -13,6 +13,7 @@ pub type MsgFrame = Frame<Message, io::Error>;
 pub struct DnsTransport {
     inner: UdpSocket,
     addr: SocketAddr,
+    buf: Vec<u8>,
 }
 
 impl DnsTransport
@@ -21,6 +22,7 @@ impl DnsTransport
         DnsTransport {
             inner: inner,
             addr: addr,
+            buf: Vec::with_capacity(4096),
         }
     }
 }
@@ -40,12 +42,12 @@ impl Transport for DnsTransport
     
     fn write(&mut self, msg: MsgFrame) -> io::Result<Option<()>> {
         if let Frame::Message(message) = msg {
-            let mut buf: Vec<u8> = Vec::with_capacity(512);
-            encode_message(&mut buf, message);
-            let _ = try!(self.inner.send_to(&buf, &self.addr));
+            encode_message(&mut self.buf, message);
+            let _ = try!(self.inner.send_to(&self.buf, &self.addr));
+            self.buf.clear();
             Ok(Some(()))
         } else {
-            panic!("unexpected error frame")
+            panic!("unexpected frame type")
         }
     }
 
