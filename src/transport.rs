@@ -36,7 +36,7 @@ impl Transport for DnsTransport
     type Out = MsgFrame;
 
     fn read(&mut self) -> io::Result<Option<MsgFrame>> {
-        let mut buf = [0u8; 512];
+        let mut buf = [0u8; 2048];
         match self.inner.recv_from(&mut buf) {
             Ok((_, _)) => Ok(Some(Frame::Message(decode_message(&mut buf)))),
             Err(e) => Err(e),
